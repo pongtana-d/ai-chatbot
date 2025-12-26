@@ -22,6 +22,14 @@ const THINKING_LEVELS = [
   { id: "max", name: "Max", budget: -1 },
 ];
 
+const TTS_VOICES = [
+  { id: "Kore", name: "Kore", description: "Female, warm" },
+  { id: "Puck", name: "Puck", description: "Male, friendly" },
+  { id: "Charon", name: "Charon", description: "Male, deep" },
+  { id: "Fenrir", name: "Fenrir", description: "Male, strong" },
+  { id: "Aoede", name: "Aoede", description: "Female, clear" },
+];
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] =
@@ -30,8 +38,9 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedModel, setSelectedModel] = useState("gemini-2.5-pro");
+  const [selectedModel, setSelectedModel] = useState("gemini-3-flash-preview");
   const [thinkingLevel, setThinkingLevel] = useState("off");
+  const [selectedVoice, setSelectedVoice] = useState("Kore");
   const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -321,6 +330,29 @@ export default function ChatPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Voice Selection Section */}
+                <div className="border-t border-gray-200 dark:border-gray-700 p-2">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1">
+                    🔊 TTS Voice
+                  </p>
+                  <div className="flex flex-wrap gap-1 px-2">
+                    {TTS_VOICES.map((voice) => (
+                      <button
+                        key={voice.id}
+                        onClick={() => setSelectedVoice(voice.id)}
+                        title={voice.description}
+                        className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
+                          selectedVoice === voice.id
+                            ? "bg-green-500 text-white"
+                            : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                        }`}
+                      >
+                        {voice.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -363,7 +395,7 @@ export default function ChatPage() {
           ) : (
             <div className="max-w-3xl mx-auto py-6 px-4">
               {currentConversation?.messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
+                <MessageBubble key={message.id} message={message} voice={selectedVoice} />
               ))}
               {streamingContent && (
                 <MessageBubble
@@ -374,6 +406,7 @@ export default function ChatPage() {
                     timestamp: Date.now(),
                   }}
                   isStreaming
+                  voice={selectedVoice}
                 />
               )}
               {isLoading && !streamingContent && (
@@ -457,11 +490,90 @@ export default function ChatPage() {
 function MessageBubble({
   message,
   isStreaming = false,
+  voice = "Kore",
 }: {
   message: Message;
   isStreaming?: boolean;
+  voice?: string;
 }) {
   const isUser = message.role === "user";
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+
+  const stopSpeaking = () => {
+    if (sourceNodeRef.current) {
+      sourceNodeRef.current.stop();
+      sourceNodeRef.current = null;
+    }
+    setIsSpeaking(false);
+  };
+
+  const speakText = async () => {
+    if (isSpeaking) {
+      stopSpeaking();
+      return;
+    }
+
+    if (!message.content || isStreaming) return;
+
+    setIsLoadingAudio(true);
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: message.content, voice }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate speech");
+      }
+
+      const data = await response.json();
+      
+      // Decode base64 to ArrayBuffer
+      const binaryString = atob(data.audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Create AudioContext if not exists
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+      }
+
+      const audioContext = audioContextRef.current;
+      
+      // Convert PCM to AudioBuffer
+      const pcmData = new Int16Array(bytes.buffer);
+      const floatData = new Float32Array(pcmData.length);
+      for (let i = 0; i < pcmData.length; i++) {
+        floatData[i] = pcmData[i] / 32768;
+      }
+
+      const audioBuffer = audioContext.createBuffer(1, floatData.length, 24000);
+      audioBuffer.getChannelData(0).set(floatData);
+
+      // Play audio
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        setIsSpeaking(false);
+        sourceNodeRef.current = null;
+      };
+      
+      sourceNodeRef.current = source;
+      source.start();
+      setIsSpeaking(true);
+    } catch (error) {
+      console.error("TTS Error:", error);
+    } finally {
+      setIsLoadingAudio(false);
+    }
+  };
 
   return (
     <div className={`flex gap-3 mb-6 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -512,9 +624,41 @@ function MessageBubble({
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
-          <div className={`markdown-content ${isStreaming ? "typing-cursor" : ""}`}>
-            <ReactMarkdown>{message.content}</ReactMarkdown>
-          </div>
+          <>
+            <div className={`markdown-content ${isStreaming ? "typing-cursor" : ""}`}>
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            </div>
+            {!isStreaming && message.content && (
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={speakText}
+                  disabled={isLoadingAudio}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    isSpeaking
+                      ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
+                      : "hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
+                  } ${isLoadingAudio ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={isSpeaking ? "Stop speaking" : "Read aloud"}
+                >
+                  {isLoadingAudio ? (
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : isSpeaking ? (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

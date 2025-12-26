@@ -14,7 +14,7 @@ const THINKING_BUDGET_MAP: Record<string, number> = {
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, model = "gemini-2.5-pro", thinkingLevel } = await request.json();
+    const { messages, model = "gemini-3-flash-preview", thinkingLevel } = await request.json();
 
     if (!process.env.GEMINI_API_KEY) {
       return new Response(
