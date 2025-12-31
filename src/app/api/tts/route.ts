@@ -1,14 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest } from "next/server";
+import { TTS_VOICES, DEFAULT_VOICE, TTS_SAMPLE_RATE } from "@/lib/constants";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-// Available voices: Aoede, Charon, Fenrir, Kore, Puck, etc.
-const VOICES = ["Kore", "Puck", "Charon", "Fenrir", "Aoede"];
+const VOICE_IDS = TTS_VOICES.map((v) => v.id);
 
 export async function POST(request: NextRequest) {
   try {
-    const { text, voice = "Kore" } = await request.json();
+    const { text, voice = DEFAULT_VOICE } = await request.json();
 
     if (!process.env.GEMINI_API_KEY) {
       return new Response(
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate voice
-    const selectedVoice = VOICES.includes(voice) ? voice : "Kore";
+    const selectedVoice = VOICE_IDS.includes(voice) ? voice : DEFAULT_VOICE;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash-preview-tts",
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       JSON.stringify({ 
         audio: audioData,
         format: "pcm",
-        sampleRate: 24000,
+        sampleRate: TTS_SAMPLE_RATE,
         channels: 1,
         sampleWidth: 2
       }),

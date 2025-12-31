@@ -1,62 +1,52 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
-import ReactMarkdown from "react-markdown";
 import { Message, Conversation } from "@/types/chat";
 import { chatStorage } from "@/lib/storage";
+import {
+  MODELS,
+  THINKING_LEVELS,
+  TTS_VOICES,
+  DEFAULT_MODEL,
+  DEFAULT_VOICE,
+  DEFAULT_THINKING_LEVEL,
+} from "@/lib/constants";
 import Sidebar from "@/components/Sidebar";
-
-const MODELS = [
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", supportsThinking: true },
-  { id: "gemini-flash-latest", name: "Gemini Flash Latest", supportsThinking: false },
-  { id: "gemini-3-flash-preview", name: "Gemini 3 Flash", supportsThinking: true },
-  { id: "gemini-3-pro-preview", name: "Gemini 3 Pro", supportsThinking: true },
-];
-
-const THINKING_LEVELS = [
-  { id: "off", name: "Off", budget: 0 },
-  { id: "low", name: "Low", budget: 1024 },
-  { id: "medium", name: "Medium", budget: 8192 },
-  { id: "high", name: "High", budget: 24576 },
-  { id: "max", name: "Max", budget: -1 },
-];
-
-const TTS_VOICES = [
-  { id: "Kore", name: "Kore", description: "Female, warm" },
-  { id: "Puck", name: "Puck", description: "Male, friendly" },
-  { id: "Charon", name: "Charon", description: "Male, deep" },
-  { id: "Fenrir", name: "Fenrir", description: "Male, strong" },
-  { id: "Aoede", name: "Aoede", description: "Female, clear" },
-];
+import MessageBubble from "@/components/MessageBubble";
+import { ToastContainer, useToast } from "@/components/Toast";
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [currentConversation, setCurrentConversation] =
-    useState<Conversation | null>(null);
+  const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedModel, setSelectedModel] = useState("gemini-3-flash-preview");
-  const [thinkingLevel, setThinkingLevel] = useState("off");
-  const [selectedVoice, setSelectedVoice] = useState("Kore");
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [thinkingLevel, setThinkingLevel] = useState(DEFAULT_THINKING_LEVEL);
+  const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { toasts, dismissToast, showError } = useToast();
 
   const currentModelConfig = MODELS.find((m) => m.id === selectedModel);
   const supportsThinking = currentModelConfig?.supportsThinking ?? false;
 
+  // Load conversations from storage
   useEffect(() => {
     const saved = chatStorage.getConversations();
     setConversations(saved);
   }, []);
 
+  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentConversation?.messages, streamingContent]);
 
+  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -74,24 +64,36 @@ export default function ChatPage() {
     }
   }, [selectedModel, supportsThinking]);
 
-  const createNewConversation = () => {
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-model-selector]")) {
+        setShowModelSelector(false);
+      }
+    };
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, []);
+
+  const createNewConversation = useCallback(() => {
     setCurrentConversation(null);
     setInput("");
-  };
+  }, []);
 
-  const selectConversation = (conv: Conversation) => {
+  const selectConversation = useCallback((conv: Conversation) => {
     setCurrentConversation(conv);
-  };
+  }, []);
 
-  const deleteConversation = (id: string) => {
+  const deleteConversation = useCallback((id: string) => {
     chatStorage.deleteConversation(id);
-    setConversations(conversations.filter((c) => c.id !== id));
+    setConversations((prev) => prev.filter((c) => c.id !== id));
     if (currentConversation?.id === id) {
       setCurrentConversation(null);
     }
-  };
+  }, [currentConversation?.id]);
 
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
@@ -138,7 +140,8 @@ export default function ChatPage() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to get response");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to get response");
       }
 
       const reader = response.body?.getReader();
@@ -161,7 +164,7 @@ export default function ChatPage() {
               fullContent += parsed.content;
               setStreamingContent(fullContent);
             } catch {
-              // Ignore parse errors
+              // Ignore parse errors for incomplete chunks
             }
           }
         }
@@ -193,6 +196,8 @@ export default function ChatPage() {
       });
     } catch (error) {
       console.error("Error:", error);
+      showError(error instanceof Error ? error.message : "Something went wrong");
+      
       const errorMessage: Message = {
         id: uuidv4(),
         role: "assistant",
@@ -209,17 +214,24 @@ export default function ChatPage() {
       setIsLoading(false);
       setStreamingContent("");
     }
-  };
+  }, [input, isLoading, currentConversation, selectedModel, supportsThinking, thinkingLevel, showError]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
-  };
+  }, [sendMessage]);
+
+  const handleTTSError = useCallback((error: string) => {
+    showError(`TTS Error: ${error}`);
+  }, [showError]);
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Toast notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       {/* Sidebar */}
       <Sidebar
         isOpen={sidebarOpen}
@@ -238,24 +250,13 @@ export default function ChatPage() {
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+            aria-label="Toggle sidebar"
           >
-            <svg
-              className="w-5 h-5 text-gray-600 dark:text-gray-300"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
+            <MenuIcon />
           </button>
-          
+
           {/* Model Selector */}
-          <div className="relative">
+          <div className="relative" data-model-selector>
             <button
               onClick={() => setShowModelSelector(!showModelSelector)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
@@ -263,21 +264,16 @@ export default function ChatPage() {
               <span className="text-lg font-semibold text-gray-800 dark:text-white">
                 {currentModelConfig?.name || "Gemini"}
               </span>
-              <svg
-                className={`w-4 h-4 text-gray-500 transition-transform ${showModelSelector ? "rotate-180" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              <ChevronIcon isOpen={showModelSelector} />
             </button>
 
             {/* Model Dropdown */}
             {showModelSelector && (
               <div className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden">
                 <div className="p-2">
-                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1">Models</p>
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1">
+                    Models
+                  </p>
                   {MODELS.map((model) => (
                     <button
                       key={model.id}
@@ -297,11 +293,7 @@ export default function ChatPage() {
                           {model.supportsThinking ? "Supports thinking" : "Standard"}
                         </div>
                       </div>
-                      {selectedModel === model.id && (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                        </svg>
-                      )}
+                      {selectedModel === model.id && <CheckIcon />}
                     </button>
                   ))}
                 </div>
@@ -317,7 +309,13 @@ export default function ChatPage() {
                         <button
                           key={level.id}
                           onClick={() => setThinkingLevel(level.id)}
-                          title={level.budget === -1 ? "Dynamic (auto)" : level.budget === 0 ? "Disabled" : `${level.budget} tokens`}
+                          title={
+                            level.budget === -1
+                              ? "Dynamic (auto)"
+                              : level.budget === 0
+                              ? "Disabled"
+                              : `${level.budget} tokens`
+                          }
                           className={`px-2.5 py-1 text-xs rounded-full transition-colors ${
                             thinkingLevel === level.id
                               ? "bg-purple-500 text-white"
@@ -368,34 +366,16 @@ export default function ChatPage() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto">
           {!currentConversation?.messages.length && !streamingContent ? (
-            <div className="h-full flex flex-col items-center justify-center p-8">
-              <div className="w-16 h-16 mb-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-2xl font-semibold text-gray-800 dark:text-white mb-2">
-                How can I help you today?
-              </h2>
-              <p className="text-gray-500 dark:text-gray-400 text-center max-w-md">
-                Start a conversation with Gemini AI. Ask questions, get creative
-                ideas, or just chat!
-              </p>
-            </div>
+            <EmptyState />
           ) : (
             <div className="max-w-3xl mx-auto py-6 px-4">
               {currentConversation?.messages.map((message) => (
-                <MessageBubble key={message.id} message={message} voice={selectedVoice} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  voice={selectedVoice}
+                  onError={handleTTSError}
+                />
               ))}
               {streamingContent && (
                 <MessageBubble
@@ -409,36 +389,7 @@ export default function ChatPage() {
                   voice={selectedVoice}
                 />
               )}
-              {isLoading && !streamingContent && (
-                <div className="flex gap-3 mb-6">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
-                    <svg
-                      className="w-4 h-4 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
-                  </div>
-                  <div className="flex items-center gap-1 py-3">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.1s" }}
-                    />
-                    <div
-                      className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                      style={{ animationDelay: "0.2s" }}
-                    />
-                  </div>
-                </div>
-              )}
+              {isLoading && !streamingContent && <LoadingIndicator />}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -461,20 +412,9 @@ export default function ChatPage() {
                 onClick={sendMessage}
                 disabled={!input.trim() || isLoading}
                 className="p-2 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
+                aria-label="Send message"
               >
-                <svg
-                  className="w-5 h-5 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                  />
-                </svg>
+                <SendIcon />
               </button>
             </div>
             <p className="text-xs text-gray-400 text-center mt-2">
@@ -487,179 +427,119 @@ export default function ChatPage() {
   );
 }
 
-function MessageBubble({
-  message,
-  isStreaming = false,
-  voice = "Kore",
-}: {
-  message: Message;
-  isStreaming?: boolean;
-  voice?: string;
-}) {
-  const isUser = message.role === "user";
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
-
-  const stopSpeaking = () => {
-    if (sourceNodeRef.current) {
-      sourceNodeRef.current.stop();
-      sourceNodeRef.current = null;
-    }
-    setIsSpeaking(false);
-  };
-
-  const speakText = async () => {
-    if (isSpeaking) {
-      stopSpeaking();
-      return;
-    }
-
-    if (!message.content || isStreaming) return;
-
-    setIsLoadingAudio(true);
-    try {
-      const response = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: message.content, voice }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to generate speech");
-      }
-
-      const data = await response.json();
-      
-      // Decode base64 to ArrayBuffer
-      const binaryString = atob(data.audio);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      // Create AudioContext if not exists
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-      }
-
-      const audioContext = audioContextRef.current;
-      
-      // Convert PCM to AudioBuffer
-      const pcmData = new Int16Array(bytes.buffer);
-      const floatData = new Float32Array(pcmData.length);
-      for (let i = 0; i < pcmData.length; i++) {
-        floatData[i] = pcmData[i] / 32768;
-      }
-
-      const audioBuffer = audioContext.createBuffer(1, floatData.length, 24000);
-      audioBuffer.getChannelData(0).set(floatData);
-
-      // Play audio
-      const source = audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContext.destination);
-      source.onended = () => {
-        setIsSpeaking(false);
-        sourceNodeRef.current = null;
-      };
-      
-      sourceNodeRef.current = source;
-      source.start();
-      setIsSpeaking(true);
-    } catch (error) {
-      console.error("TTS Error:", error);
-    } finally {
-      setIsLoadingAudio(false);
-    }
-  };
-
+// Icon Components
+function MenuIcon() {
   return (
-    <div className={`flex gap-3 mb-6 ${isUser ? "flex-row-reverse" : ""}`}>
-      <div
-        className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-          isUser
-            ? "bg-gray-600"
-            : "bg-gradient-to-br from-blue-500 to-purple-600"
-        }`}
-      >
-        {isUser ? (
-          <svg
-            className="w-4 h-4 text-white"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-            />
-          </svg>
-        ) : (
-          <svg
-            className="w-4 h-4 text-white"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M13 10V3L4 14h7v7l9-11h-7z"
-            />
-          </svg>
-        )}
+    <svg
+      className="w-5 h-5 text-gray-600 dark:text-gray-300"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 6h16M4 12h16M4 18h16"
+      />
+    </svg>
+  );
+}
+
+function ChevronIcon({ isOpen }: { isOpen: boolean }) {
+  return (
+    <svg
+      className={`w-4 h-4 text-gray-500 transition-transform ${isOpen ? "rotate-180" : ""}`}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+      <path
+        fillRule="evenodd"
+        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+      />
+    </svg>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="h-full flex flex-col items-center justify-center p-8">
+      <div className="w-16 h-16 mb-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+        <svg
+          className="w-8 h-8 text-white"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+          />
+        </svg>
       </div>
-      <div
-        className={`max-w-[80%] ${
-          isUser
-            ? "bg-blue-500 text-white rounded-2xl rounded-tr-sm px-4 py-2"
-            : "text-gray-800 dark:text-gray-100"
-        }`}
-      >
-        {isUser ? (
-          <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <>
-            <div className={`markdown-content ${isStreaming ? "typing-cursor" : ""}`}>
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-            </div>
-            {!isStreaming && message.content && (
-              <div className="mt-2 flex gap-2">
-                <button
-                  onClick={speakText}
-                  disabled={isLoadingAudio}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    isSpeaking
-                      ? "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400"
-                      : "hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400"
-                  } ${isLoadingAudio ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={isSpeaking ? "Stop speaking" : "Read aloud"}
-                >
-                  {isLoadingAudio ? (
-                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                    </svg>
-                  ) : isSpeaking ? (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            )}
-          </>
-        )}
+      <h2 className="text-2xl font-semibold text-gray-800 dark:text-white mb-2">
+        How can I help you today?
+      </h2>
+      <p className="text-gray-500 dark:text-gray-400 text-center max-w-md">
+        Start a conversation with Gemini AI. Ask questions, get creative ideas, or just chat!
+      </p>
+    </div>
+  );
+}
+
+function LoadingIndicator() {
+  return (
+    <div className="flex gap-3 mb-6">
+      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+        <svg
+          className="w-4 h-4 text-white"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M13 10V3L4 14h7v7l9-11h-7z"
+          />
+        </svg>
+      </div>
+      <div className="flex items-center gap-1 py-3">
+        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+        <div
+          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+          style={{ animationDelay: "0.1s" }}
+        />
+        <div
+          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+          style={{ animationDelay: "0.2s" }}
+        />
       </div>
     </div>
   );

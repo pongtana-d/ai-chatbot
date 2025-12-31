@@ -1,20 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
+import { THINKING_BUDGET_MAP, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from "@/lib/constants";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
-// Thinking budget map
-const THINKING_BUDGET_MAP: Record<string, number> = {
-  off: 0,
-  low: 1024,
-  medium: 8192,
-  high: 24576,
-  max: -1, // -1 = automatic/dynamic
-};
-
 export async function POST(request: NextRequest) {
   try {
-    const { messages, model = "gemini-3-flash-preview", thinkingLevel } = await request.json();
+    const { messages, model = DEFAULT_MODEL, thinkingLevel } = await request.json();
 
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
@@ -32,9 +24,11 @@ export async function POST(request: NextRequest) {
     const lastMessage = messages[messages.length - 1];
 
     // Build config with optional thinking
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const config: any = {
-      maxOutputTokens: 16384,
+    const config: {
+      maxOutputTokens: number;
+      thinkingConfig?: { thinkingBudget: number; includeThoughts: boolean };
+    } = {
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
     };
 
     // Add thinking config using thinkingBudget
