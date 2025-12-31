@@ -82,7 +82,7 @@ src/
 
 ## Technologies
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 15
 - **Language**: TypeScript 5.7
 - **Styling**: Tailwind CSS 3.4
 - **AI**: Google Gen AI SDK (@google/genai)
