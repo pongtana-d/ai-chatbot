@@ -4,6 +4,17 @@ import { THINKING_BUDGET_MAP, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from "@/lib/con
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
+interface ImageData {
+  data: string;
+  mimeType: string;
+}
+
+interface MessageInput {
+  role: string;
+  content: string;
+  images?: ImageData[];
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { messages, model = DEFAULT_MODEL, thinkingLevel } = await request.json();
@@ -15,13 +26,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert messages to Gemini format
-    const history = messages.slice(0, -1).map((msg: { role: string; content: string }) => ({
+    // Convert messages to Gemini format (without images in history for simplicity)
+    const history = messages.slice(0, -1).map((msg: MessageInput) => ({
       role: msg.role === "assistant" ? "model" : "user",
       parts: [{ text: msg.content }],
     }));
 
-    const lastMessage = messages[messages.length - 1];
+    const lastMessage: MessageInput = messages[messages.length - 1];
+
+    // Build parts for the last message (text + images)
+    const parts: Array<{ text: string } | { inlineData: { data: string; mimeType: string } }> = [];
+    
+    // Add images first (recommended by Gemini docs)
+    if (lastMessage.images && lastMessage.images.length > 0) {
+      for (const image of lastMessage.images) {
+        parts.push({
+          inlineData: {
+            data: image.data,
+            mimeType: image.mimeType,
+          },
+        });
+      }
+    }
+    
+    // Add text after images
+    parts.push({ text: lastMessage.content });
 
     // Build config with optional thinking
     const config: {
@@ -42,13 +71,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const chat = ai.chats.create({
-      model,
-      history,
-      config,
-    });
-
-    const response = await chat.sendMessageStream({ message: lastMessage.content });
+    // Use generateContentStream for messages with images (no chat history)
+    // Use chat for text-only messages
+    let response;
+    if (lastMessage.images && lastMessage.images.length > 0) {
+      // For image messages, use direct generateContentStream
+      response = await ai.models.generateContentStream({
+        model,
+        contents: [
+          ...history.map((h: { role: string; parts: Array<{ text: string }> }) => ({
+            role: h.role,
+            parts: h.parts,
+          })),
+          { role: "user", parts },
+        ],
+        config,
+      });
+    } else {
+      // For text-only, use chat
+      const chat = ai.chats.create({
+        model,
+        history,
+        config,
+      });
+      response = await chat.sendMessageStream({ message: lastMessage.content });
+    }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({

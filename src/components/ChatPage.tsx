@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Message, Conversation } from "@/types/chat";
+import Image from "next/image";
+import { Message, Conversation, ImageAttachment } from "@/types/chat";
 import { chatStorage } from "@/lib/storage";
 import {
   MODELS,
@@ -16,6 +17,10 @@ import Sidebar from "@/components/Sidebar";
 import MessageBubble from "@/components/MessageBubble";
 import { ToastContainer, useToast } from "@/components/Toast";
 
+// Supported image types
+const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"];
+const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20MB
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
@@ -27,9 +32,11 @@ export default function ChatPage() {
   const [thinkingLevel, setThinkingLevel] = useState(DEFAULT_THINKING_LEVEL);
   const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toasts, dismissToast, showError } = useToast();
 
   const currentModelConfig = MODELS.find((m) => m.id === selectedModel);
@@ -93,14 +100,55 @@ export default function ChatPage() {
     }
   }, [currentConversation?.id]);
 
+  // Handle image upload
+  const handleImageUpload = useCallback(async (files: FileList | null) => {
+    if (!files) return;
+
+    const newImages: ImageAttachment[] = [];
+    
+    for (const file of Array.from(files)) {
+      // Validate file type
+      if (!SUPPORTED_IMAGE_TYPES.includes(file.type)) {
+        showError(`Unsupported image type: ${file.type}. Use PNG, JPEG, WEBP, HEIC, or HEIF.`);
+        continue;
+      }
+
+      // Validate file size
+      if (file.size > MAX_IMAGE_SIZE) {
+        showError(`Image too large: ${file.name}. Max size is 20MB.`);
+        continue;
+      }
+
+      try {
+        const base64 = await fileToBase64(file);
+        newImages.push({
+          data: base64,
+          mimeType: file.type,
+          name: file.name,
+        });
+      } catch {
+        showError(`Failed to read image: ${file.name}`);
+      }
+    }
+
+    if (newImages.length > 0) {
+      setPendingImages((prev) => [...prev, ...newImages]);
+    }
+  }, [showError]);
+
+  const removeImage = useCallback((index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+    if ((!input.trim() && pendingImages.length === 0) || isLoading) return;
 
     const userMessage: Message = {
       id: uuidv4(),
       role: "user",
-      content: input.trim(),
+      content: input.trim() || (pendingImages.length > 0 ? "What's in this image?" : ""),
       timestamp: Date.now(),
+      images: pendingImages.length > 0 ? [...pendingImages] : undefined,
     };
 
     let conversation: Conversation;
@@ -122,6 +170,7 @@ export default function ChatPage() {
 
     setCurrentConversation(conversation);
     setInput("");
+    setPendingImages([]); // Clear pending images after sending
     setIsLoading(true);
     setStreamingContent("");
 
@@ -133,6 +182,10 @@ export default function ChatPage() {
           messages: conversation.messages.map((m) => ({
             role: m.role,
             content: m.content,
+            images: m.images?.map((img) => ({
+              data: img.data,
+              mimeType: img.mimeType,
+            })),
           })),
           model: selectedModel,
           thinkingLevel: supportsThinking && thinkingLevel !== "off" ? thinkingLevel : undefined,
@@ -214,7 +267,7 @@ export default function ChatPage() {
       setIsLoading(false);
       setStreamingContent("");
     }
-  }, [input, isLoading, currentConversation, selectedModel, supportsThinking, thinkingLevel, showError]);
+  }, [input, isLoading, currentConversation, selectedModel, supportsThinking, thinkingLevel, showError, pendingImages]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -398,19 +451,69 @@ export default function ChatPage() {
         {/* Input Area */}
         <div className="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
           <div className="max-w-3xl mx-auto">
+            {/* Image Preview */}
+            {pendingImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2 p-2 bg-gray-100 dark:bg-gray-700 rounded-xl">
+                {pendingImages.map((img, index) => (
+                  <div key={index} className="relative group">
+                    <Image
+                      src={`data:${img.mimeType};base64,${img.data}`}
+                      alt={img.name}
+                      width={80}
+                      height={80}
+                      className="w-20 h-20 object-cover rounded-lg"
+                    />
+                    <button
+                      onClick={() => removeImage(index)}
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label="Remove image"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                    <span className="absolute bottom-0 left-0 right-0 text-xs text-white bg-black/50 px-1 truncate rounded-b-lg">
+                      {img.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            
             <div className="relative flex items-end gap-2 bg-gray-100 dark:bg-gray-700 rounded-2xl p-2">
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+                multiple
+                onChange={(e) => handleImageUpload(e.target.files)}
+                className="hidden"
+              />
+              
+              {/* Image upload button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
+                className="p-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                aria-label="Upload image"
+                title="Upload image"
+              >
+                <ImageUploadIcon />
+              </button>
+              
               <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message Gemini..."
+                placeholder={pendingImages.length > 0 ? "Add a message about this image..." : "Message Gemini..."}
                 rows={1}
                 className="flex-1 bg-transparent border-none outline-none resize-none px-3 py-2 text-gray-800 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 max-h-48"
               />
               <button
                 onClick={sendMessage}
-                disabled={!input.trim() || isLoading}
+                disabled={(!input.trim() && pendingImages.length === 0) || isLoading}
                 className="p-2 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
                 aria-label="Send message"
               >
@@ -484,6 +587,19 @@ function SendIcon() {
   );
 }
 
+function ImageUploadIcon() {
+  return (
+    <svg className="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
@@ -543,4 +659,19 @@ function LoadingIndicator() {
       </div>
     </div>
   );
+}
+
+// Helper function to convert file to base64
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove the data URL prefix (e.g., "data:image/png;base64,")
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

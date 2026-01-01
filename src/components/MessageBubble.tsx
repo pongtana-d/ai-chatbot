@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import { Message } from "@/types/chat";
 import { TTS_SAMPLE_RATE } from "@/lib/constants";
@@ -156,7 +157,24 @@ export default function MessageBubble({
         }`}
       >
         {isUser ? (
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          <div>
+            {/* Display attached images */}
+            {message.images && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {message.images.map((img, index) => (
+                  <Image
+                    key={index}
+                    src={`data:${img.mimeType};base64,${img.data}`}
+                    alt={img.name || `Image ${index + 1}`}
+                    width={200}
+                    height={200}
+                    className="max-w-[200px] max-h-[200px] object-cover rounded-lg"
+                  />
+                ))}
+              </div>
+            )}
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          </div>
         ) : (
           <>
             <div className={`markdown-content ${isStreaming ? "typing-cursor" : ""}`}>
