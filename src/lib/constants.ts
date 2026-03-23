@@ -45,3 +45,12 @@ export const TTS_SAMPLE_RATE = 24000;
 export type ModelId = typeof MODELS[number]["id"];
 export type ThinkingLevelId = typeof THINKING_LEVELS[number]["id"];
 export type VoiceId = typeof TTS_VOICES[number]["id"];
+
+export const TRANSLATION_MODES = [
+  { id: "none", name: "Chat Mode" },
+  { id: "th-zh", name: "🇹🇭 TH -> 🇨🇳 ZH" },
+  { id: "zh-th", name: "🇨🇳 ZH -> 🇹🇭 TH" },
+] as const;
+
+export type TranslationModeId = typeof TRANSLATION_MODES[number]["id"];
+export const DEFAULT_TRANSLATION_MODE = "none";
