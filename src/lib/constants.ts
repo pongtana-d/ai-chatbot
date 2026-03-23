@@ -48,8 +48,7 @@ export type VoiceId = typeof TTS_VOICES[number]["id"];
 
 export const TRANSLATION_MODES = [
   { id: "none", name: "Chat Mode" },
-  { id: "th-zh", name: "🇹🇭 TH -> 🇨🇳 ZH" },
-  { id: "zh-th", name: "🇨🇳 ZH -> 🇹🇭 TH" },
+  { id: "th-zh-auto", name: "🇹🇭 TH ↔ 🇨🇳 ZH Translate" },
 ] as const;
 
 export type TranslationModeId = typeof TRANSLATION_MODES[number]["id"];

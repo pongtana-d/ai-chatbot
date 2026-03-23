@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { THINKING_BUDGET_MAP, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from "@/lib/constants";
+import { SYSTEM_PROMPTS } from "@/lib/prompts";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
@@ -32,10 +33,8 @@ export async function POST(request: NextRequest) {
       maxOutputTokens: MAX_OUTPUT_TOKENS,
     };
 
-    if (translationMode === "th-zh") {
-      config.systemInstruction = "You are a professional translator. Translate the following Thai text to Simplified Chinese. Only output the translated text without any explanations, conversational filler, or extra words. If the user input is an image, describe the image in Simplified Chinese.";
-    } else if (translationMode === "zh-th") {
-      config.systemInstruction = "You are a professional translator. Translate the following Chinese text to Thai. Only output the translated text without any explanations, conversational filler, or extra words. If the user input is an image, describe the image in Thai.";
+    if (translationMode === "th-zh-auto") {
+      config.systemInstruction = SYSTEM_PROMPTS.TRANSLATION_TH_ZH_AUTO;
     }
 
     // Add thinking config using thinkingBudget
