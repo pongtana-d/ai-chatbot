@@ -1,11 +1,28 @@
 // Shared constants for the application
 
-export const MODELS = [
+const defaultModels = [
   { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", supportsThinking: true },
   { id: "gemini-flash-latest", name: "Gemini Flash Latest", supportsThinking: false },
   { id: "gemini-3-flash-preview", name: "Gemini 3 Flash", supportsThinking: true },
   { id: "gemini-3-pro-preview", name: "Gemini 3 Pro", supportsThinking: true },
-] as const;
+];
+
+export type ModelConfig = {
+  id: string;
+  name: string;
+  supportsThinking: boolean;
+};
+
+export const MODELS: ModelConfig[] = (() => {
+  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_AVAILABLE_MODELS) {
+    try {
+      return JSON.parse(process.env.NEXT_PUBLIC_AVAILABLE_MODELS);
+    } catch (e) {
+      console.error("Failed to parse NEXT_PUBLIC_AVAILABLE_MODELS", e);
+    }
+  }
+  return defaultModels;
+})();
 
 export const THINKING_LEVELS = [
   { id: "off", name: "Off", budget: 0 },
@@ -33,7 +50,9 @@ export const THINKING_BUDGET_MAP: Record<string, number> = {
 };
 
 // Default values
-export const DEFAULT_MODEL = "gemini-3-flash-preview";
+export const DEFAULT_MODEL = typeof process !== "undefined" && process.env.NEXT_PUBLIC_DEFAULT_MODEL
+  ? process.env.NEXT_PUBLIC_DEFAULT_MODEL
+  : (MODELS.length > 0 ? MODELS[0].id : "gemini-3-flash-preview");
 export const DEFAULT_VOICE = "Kore";
 export const DEFAULT_THINKING_LEVEL = "off";
 
@@ -42,7 +61,7 @@ export const MAX_OUTPUT_TOKENS = 16384;
 export const TTS_SAMPLE_RATE = 24000;
 
 // Type exports
-export type ModelId = typeof MODELS[number]["id"];
+export type ModelId = string;
 export type ThinkingLevelId = typeof THINKING_LEVELS[number]["id"];
 export type VoiceId = typeof TTS_VOICES[number]["id"];
 
