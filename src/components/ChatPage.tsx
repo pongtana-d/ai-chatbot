@@ -12,6 +12,8 @@ import {
   DEFAULT_MODEL,
   DEFAULT_VOICE,
   DEFAULT_THINKING_LEVEL,
+  TRANSLATION_MODES,
+  DEFAULT_TRANSLATION_MODE,
 } from "@/lib/constants";
 import Sidebar from "@/components/Sidebar";
 import MessageBubble from "@/components/MessageBubble";
@@ -32,6 +34,7 @@ export default function ChatPage() {
   const [thinkingLevel, setThinkingLevel] = useState(DEFAULT_THINKING_LEVEL);
   const [selectedVoice, setSelectedVoice] = useState(DEFAULT_VOICE);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [translationMode, setTranslationMode] = useState(DEFAULT_TRANSLATION_MODE);
   const [pendingImages, setPendingImages] = useState<ImageAttachment[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -189,6 +192,7 @@ export default function ChatPage() {
           })),
           model: selectedModel,
           thinkingLevel: supportsThinking && thinkingLevel !== "off" ? thinkingLevel : undefined,
+          translationMode: translationMode !== "none" ? translationMode : undefined,
         }),
       });
 
@@ -267,7 +271,7 @@ export default function ChatPage() {
       setIsLoading(false);
       setStreamingContent("");
     }
-  }, [input, isLoading, currentConversation, selectedModel, supportsThinking, thinkingLevel, showError, pendingImages]);
+  }, [input, isLoading, currentConversation, selectedModel, supportsThinking, thinkingLevel, translationMode, showError, pendingImages]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -307,6 +311,25 @@ export default function ChatPage() {
           >
             <MenuIcon />
           </button>
+
+          {/* Model Selector */}
+          {/* Translation Mode Selector */}
+          <div className="relative" data-translation-selector>
+            <select
+              value={translationMode}
+              onChange={(e) => setTranslationMode(e.target.value)}
+              className="appearance-none bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-white px-3 py-1.5 pr-8 rounded-lg font-medium text-sm border border-transparent focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-900 outline-none transition-all cursor-pointer"
+            >
+              {TRANSLATION_MODES.map((mode) => (
+                <option key={mode.id} value={mode.id}>
+                  {mode.name}
+                </option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none">
+              <ChevronIcon isOpen={false} />
+            </div>
+          </div>
 
           {/* Model Selector */}
           <div className="relative" data-model-selector>

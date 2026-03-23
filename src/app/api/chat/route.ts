@@ -1,12 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { THINKING_BUDGET_MAP, DEFAULT_MODEL, MAX_OUTPUT_TOKENS } from "@/lib/constants";
+import { SYSTEM_PROMPTS } from "@/lib/prompts";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export async function POST(request: NextRequest) {
   try {
-    const { messages, model = DEFAULT_MODEL, thinkingLevel } = await request.json();
+    const { messages, model = DEFAULT_MODEL, thinkingLevel, translationMode } = await request.json();
 
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json(
@@ -27,9 +28,14 @@ export async function POST(request: NextRequest) {
     const config: {
       maxOutputTokens: number;
       thinkingConfig?: { thinkingBudget: number; includeThoughts: boolean };
+      systemInstruction?: string;
     } = {
       maxOutputTokens: MAX_OUTPUT_TOKENS,
     };
+
+    if (translationMode === "th-zh-auto") {
+      config.systemInstruction = SYSTEM_PROMPTS.TRANSLATION_TH_ZH_AUTO;
+    }
 
     // Add thinking config using thinkingBudget
     if (thinkingLevel && thinkingLevel !== "off") {
