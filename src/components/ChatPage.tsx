@@ -1,5 +1,6 @@
 "use client";
 
+import { ThemeSwitcher } from "./ThemeSwitcher";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import Image from "next/image";
@@ -437,6 +438,9 @@ export default function ChatPage() {
               🧠 {thinkingLevel}
             </span>
           )}
+
+          <div className="flex-1" />
+          <ThemeSwitcher />
         </header>
 
         {/* Messages */}
